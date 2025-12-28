@@ -3,30 +3,37 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## 🏆 Model Performance (Llama-3.3-Nemotron-Super-49B-v1.5)
+
+| Benchmark | Score |
+|-----------|-------|
+| MATH500 | 97.4% |
+| AIME 2024 | 87.5% |
+| AIME 2025 | 82.71% |
+| GPQA | 71.97% |
+| LiveCodeBench | 73.58% |
+
 ## Quick Start
 
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Download model checkpoints (FP8 recommended for H100)
-python download_checkpoints.py --49b-fp8 --embed-8b
+# 2. Download model checkpoints (v1.5 recommended)
+python download_ckpt.py --49b-v1_5 --embed-8b
 
 # 3. Download competition data
 python download_data.py --all
 
-# 4. Start the inference server
-python src/UNIMModelDeployer.py --start --precision fp8
-
-# 5. Generate submissions
-python generate.py --input datasets/aimo3/data.csv --output submissions/submission.csv
+# 4. Run inference notebook
+jupyter notebook aimo-nemotron-super-49b-v1_5.ipynb
 ```
 
 ## Project Structure
 
 ```
 AIMOPP3/
-├── checkpoints/           # Model weights (FP8, BF16, embeddings)
+├── checkpoints/           # Model weights (v1.5, FP8, BF16, embeddings)
 ├── datasets/              # Competition and training data
 ├── embeddings/            # Extracted embeddings
 ├── submissions/           # Generated submission files
@@ -37,8 +44,12 @@ AIMOPP3/
 │   ├── extract_embeddings.py   # Embedding extraction
 │   ├── visualize_embeddings.py # 2D/3D Plotly visualizations
 │   └── benchmark.py            # Performance benchmarking
+├── aimo-nemotron-super-49b-v1_5.ipynb  # Main inference notebook (v1.5)
+├── aimo-2025-01-01-15-qwen3-30b-a3b-think-2507-fp8.ipynb  # Qwen3 baseline
+├── explore_aimo.ipynb     # Problem embedding visualization
+├── extract_aimo_problems.py  # AIMO problem extraction & embedding
 ├── download_data.py       # Data downloader
-├── download_checkpoints.py # Checkpoint downloader
+├── download_ckpt.py       # Checkpoint downloader
 ├── generate.py            # Submission generator
 ├── requirements.txt       # Python dependencies
 └── README.md              # This file
@@ -50,7 +61,9 @@ AIMOPP3/
 
 ## 1. Executive Summary
 
-The third iteration of the AI Mathematical Olympiad (AIMO) Progress Prize introduces a paradigm shift in competitive AI reasoning by providing access to NVIDIA H100 Tensor Core GPUs. This hardware allocation necessitates a fundamental reevaluation of model selection and deployment architectures. The introduction of the nvidia/Llama-3.3-Nemotron-Super-49B-v1 model, specifically engineered through Neural Architecture Search (NAS) and knowledge distillation to inhabit the memory-throughput "sweet spot" of a single H100 accelerator, offers a distinct strategic advantage. This report provides an exhaustive technical analysis and operational roadmap for leveraging this architecture within the strict offline and temporal constraints of the Kaggle competition environment.
+The third iteration of the AI Mathematical Olympiad (AIMO) Progress Prize introduces a paradigm shift in competitive AI reasoning by providing access to NVIDIA H100 Tensor Core GPUs. This hardware allocation necessitates a fundamental reevaluation of model selection and deployment architectures. The introduction of the **nvidia/Llama-3_3-Nemotron-Super-49B-v1_5** model (released July 2025), specifically engineered through Neural Architecture Search (NAS) and knowledge distillation to inhabit the memory-throughput "sweet spot" of a single H100 accelerator, offers a distinct strategic advantage. This report provides an exhaustive technical analysis and operational roadmap for leveraging this architecture within the strict offline and temporal constraints of the Kaggle competition environment.
+
+> **Latest Model (v1.5)**: The v1.5 release significantly improves upon v1, with **AIME 2024: 87.5%** and **AIME 2025: 82.71%** pass@1 scores, making it the optimal choice for mathematical reasoning tasks.
 
 Our analysis indicates that the 49B parameter count is not an arbitrary design choice but a calculated derivation intended to maximize reasoning density—the amount of logical inference capability per gigabyte of VRAM—while remaining compatible with FP8 quantization on Hopper architecture. Unlike standard 70B models that require tensor parallelism across multiple devices, the Nemotron-Super-49B allows for single-device residence, thereby eliminating inter-chip communication latency and freeing up computational budget for extended test-time compute strategies such as self-consistency and verification.
 
@@ -91,13 +104,24 @@ The resulting architecture is **heterogeneous**. Standard Transformers use ident
 
 This structural optimization means the model retains the "reasoning density" of the 70B teacher model while achieving the latency profile of a significantly smaller model. For AIMO 3 competitors, this implies that the 49B model is not a compromise; it is a specialized reasoning engine distilled specifically for the constraints of modern datacenter accelerators.
 
-### 2.3 The Reasoning Toggle and Inference Modes
+### 2.3 The Reasoning Toggle and Inference Modes (v1.5)
 
-A distinct feature of the Nemotron series is the **dynamic reasoning toggle**. Controlled via the system prompt, the model can switch between a standard conversational mode and a "Reasoning Mode".
+A distinct feature of the Nemotron series is the **dynamic reasoning toggle**. In v1.5, this is controlled via the system prompt:
 
-- **Reasoning Mode (ON)**: The model generates internal `<think>` tags (or analogous structural markers depending on the chat template) where it performs verbose intermediate computation before emitting the final answer. This is analogous to the "System 2" thinking process in human cognition.
+- **Reasoning Mode ON (default)**: The model generates internal `<think>` tags where it performs verbose intermediate computation before emitting the final answer. This is analogous to "System 2" thinking.
+- **Reasoning Mode OFF**: Add `/no_think` to the system prompt for faster, direct responses without explicit reasoning traces.
 
-**Implication**: For AIMO, this mode is mandatory. The "hidden" reasoning steps allow the model to error-correct and traverse the search space of the solution before committing to a result. The H100's FP8 throughput is specifically leveraged to generate these verbose traces quickly.
+**Recommended Settings for v1.5**:
+```python
+# For Reasoning ON mode
+temperature = 0.6
+top_p = 0.95
+
+# For Reasoning OFF mode (not recommended for AIMO)
+# Use greedy decoding (temperature=0)
+```
+
+**Implication**: For AIMO, Reasoning Mode ON is mandatory. The reasoning steps allow the model to error-correct and traverse the search space of the solution before committing to a result. The H100's throughput is leveraged to generate these verbose traces quickly.
 
 ---
 

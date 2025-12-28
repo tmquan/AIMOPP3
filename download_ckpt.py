@@ -6,14 +6,18 @@ Downloads model weights for Llama-3.3-Nemotron-Super-49B and related models
 in various precisions (FP8, BF16, FP16) for the H100 deployment.
 
 Models:
-1. nvidia/Llama-3.3-Nemotron-Super-49B-v1 (Main reasoning model)
-2. nvidia/llama-embed-nemotron-8b (Embedding model for RAG)
+1. nvidia/Llama-3_3-Nemotron-Super-49B-v1_5 (Latest reasoning model, recommended)
+   - MATH500: 97.4%, AIME 2024: 87.5%, AIME 2025: 82.71%
+   - 128K context, built-in reasoning mode
+2. nvidia/Llama-3.3-Nemotron-Super-49B-v1 (Legacy FP8/BF16)
+3. nvidia/llama-embed-nemotron-8b (Embedding model for RAG)
 
 Usage:
-    python download_checkpoints.py --all
-    python download_checkpoints.py --49b-fp8
-    python download_checkpoints.py --embed-8b
-    python download_checkpoints.py --checkpoints-dir /path/to/checkpoints
+    python download_ckpt.py --all
+    python download_ckpt.py --49b-v1_5    # Latest version (recommended)
+    python download_ckpt.py --49b-fp8     # Legacy v1 FP8
+    python download_ckpt.py --embed-8b
+    python download_ckpt.py --checkpoints-dir /path/to/checkpoints
 """
 
 import os
@@ -79,10 +83,59 @@ def check_disk_space(path: Path, required_gb: float) -> bool:
     return True
 
 
-def download_nemotron_49b_fp8():
-    """Download Nemotron-Super-49B in FP8 precision (optimized for H100)."""
+def download_nemotron_49b_v1_5():
+    """Download Nemotron-Super-49B-v1.5 (latest version, optimized for H100)."""
     print("=" * 80)
-    print("🔽 Downloading Llama-3.3-Nemotron-Super-49B-v1 (FP8)...")
+    print("🔽 Downloading Llama-3.3-Nemotron-Super-49B-v1.5 (Latest)...")
+    print("   Optimized for H100 GPUs with ~50GB VRAM usage")
+    print("   Benchmark: MATH500 97.4%, AIME 2024 87.5%, AIME 2025 82.71%")
+    print("=" * 80)
+    
+    model_id = "nvidia/Llama-3_3-Nemotron-Super-49B-v1_5"
+    local_dir = CHECKPOINTS_DIR / "nemotron-super-49b-v1_5"
+    
+    # Check disk space (~100GB required for BF16 weights)
+    check_disk_space(CHECKPOINTS_DIR, 110.0)
+    
+    try:
+        print(f"\n📥 Downloading from: {model_id}")
+        print(f"📂 Target directory: {local_dir}")
+        
+        # Download the model
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=str(local_dir),
+            local_dir_use_symlinks=False,
+            resume_download=True,
+            ignore_patterns=["*.md", "*.txt", "*.json.lock"]
+        )
+        
+        print(f"\n✅ Download complete!")
+        print(f"   Location: {local_dir}")
+        
+        # List downloaded files
+        files = list(local_dir.glob("**/*"))
+        total_size = sum(f.stat().st_size for f in files if f.is_file())
+        print(f"   Total size: {total_size / (1024**3):.2f} GB")
+        print(f"   Files: {len([f for f in files if f.is_file()])}")
+        
+        return local_dir
+        
+    except HfHubHTTPError as e:
+        print(f"❌ Error downloading model: {e}")
+        print("   You may need to:")
+        print("   1. Login: huggingface-cli login")
+        print("   2. Accept model license on HuggingFace")
+        return None
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return None
+
+
+def download_nemotron_49b_fp8():
+    """Download Nemotron-Super-49B-v1 in FP8 precision (legacy)."""
+    print("=" * 80)
+    print("🔽 Downloading Llama-3.3-Nemotron-Super-49B-v1 (FP8 Legacy)...")
     print("   This is optimized for H100 GPUs with ~49GB VRAM usage")
     print("=" * 80)
     
@@ -283,23 +336,28 @@ def main():
         epilog="""
 Examples:
   # Download all models
-  python download_checkpoints.py --all
+  python download_ckpt.py --all
   
-  # Download only the 49B FP8 model (recommended for H100)
-  python download_checkpoints.py --49b-fp8
+  # Download the latest 49B v1.5 model (recommended)
+  python download_ckpt.py --49b-v1_5
+  
+  # Download legacy 49B FP8 model
+  python download_ckpt.py --49b-fp8
   
   # Download only the embedding model
-  python download_checkpoints.py --embed-8b
+  python download_ckpt.py --embed-8b
   
   # Download vLLM wheels for offline use
-  python download_checkpoints.py --wheels
+  python download_ckpt.py --wheels
   
   # Custom output directory
-  python download_checkpoints.py --all --checkpoints-dir /data/checkpoints
+  python download_ckpt.py --all --checkpoints-dir /data/checkpoints
 
 Model Sizes:
-  - Nemotron-49B-FP8:  ~50 GB (fits on single H100-80GB)
-  - Nemotron-49B-BF16: ~98 GB (requires tensor parallelism)
+  - Nemotron-Super-49B-v1.5: ~100 GB (latest, best performance)
+      MATH500: 97.4%, AIME 2024: 87.5%, AIME 2025: 82.71%
+  - Nemotron-49B-FP8:  ~50 GB (legacy v1, fits on single H100-80GB)
+  - Nemotron-49B-BF16: ~98 GB (legacy v1, requires tensor parallelism)
   - Embed-8B:          ~16 GB
         """
     )
@@ -308,17 +366,18 @@ Model Sizes:
         '--checkpoints-dir', type=str, default=str(DEFAULT_CHECKPOINTS_DIR),
         help='Directory for model checkpoints'
     )
-    parser.add_argument('--49b-fp8', dest='fp8_49b', action='store_true', help='Download 49B FP8 model (recommended)')
-    parser.add_argument('--49b-bf16', dest='bf16_49b', action='store_true', help='Download 49B BF16 model')
+    parser.add_argument('--49b-v1_5', dest='v1_5_49b', action='store_true', help='Download 49B v1.5 model (latest, recommended)')
+    parser.add_argument('--49b-fp8', dest='fp8_49b', action='store_true', help='Download 49B FP8 model (legacy v1)')
+    parser.add_argument('--49b-bf16', dest='bf16_49b', action='store_true', help='Download 49B BF16 model (legacy v1)')
     parser.add_argument('--embed-8b', dest='embed_8b', action='store_true', help='Download 8B embedding model')
     parser.add_argument('--wheels', action='store_true', help='Download vLLM wheels')
     parser.add_argument('--all', action='store_true', help='Download all models')
     
     args = parser.parse_args()
     
-    # Default to FP8 + embed if nothing specified
-    if not (args.all or args.fp8_49b or args.bf16_49b or args.embed_8b or args.wheels):
-        args.fp8_49b = True
+    # Default to v1.5 + embed if nothing specified
+    if not (args.all or args.v1_5_49b or args.fp8_49b or args.bf16_49b or args.embed_8b or args.wheels):
+        args.v1_5_49b = True
         args.embed_8b = True
     
     print("=" * 80)
@@ -329,6 +388,9 @@ Model Sizes:
     print()
     
     downloads = {}
+    
+    if args.all or args.v1_5_49b:
+        downloads['Nemotron-Super-49B-v1.5'] = download_nemotron_49b_v1_5()
     
     if args.all or args.fp8_49b:
         downloads['Nemotron-49B-FP8'] = download_nemotron_49b_fp8()
